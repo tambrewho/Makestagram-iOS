@@ -25,16 +25,48 @@ struct PostService {
     }
     
     private static func create(forURLString urlString: String, aspectHeight: CGFloat) {
-        // creates reference to currentUser
         let currentUser = User.current
-        // initialize a new post
         let post = Post(imageURL: urlString, imageHeight: aspectHeight)
-        // convert new post object to dictionary
-        let dict = post.dictValue
         
-        // construct path to new post data location
-        let postRef = Database.database().reference().child("posts").child(currentUser.uid).childByAutoId()
-        //write data to specified location
-        postRef.updateChildValues(dict)
+        // create references to important locations
+        let rootRef = Database.database().reference()
+        let newPostRef = rootRef.child("posts").child(currentUser.uid).childByAutoId()
+        let newPostKey = newPostRef.key
+        
+        // get array of UIDs
+        UserService.followers(for: currentUser) { (followerUIDs) in
+            // construct a timeline JSON object where we store our current user's uid
+            let timelinePostDict = ["poster_uid" : currentUser.uid]
+            
+            // create mutable dictionary that stores the data written to the database
+            var updatedData: [String : Any] = ["timeline/\(currentUser.uid)/\(newPostKey)" : timelinePostDict]
+            
+            // add post to follower's timelines
+            for uid in followerUIDs {
+                updatedData["timeline/\(uid)/\(newPostKey)"] = timelinePostDict
+            }
+            
+            // write the posts
+            let postDict = post.dictValue
+            updatedData["posts/\(currentUser.uid)/\(newPostKey)"] = postDict
+            
+            // write multi-location update
+            rootRef.updateChildValues(updatedData)
+        }
+    }
+    
+    static func show(forKey postKey: String, posterUID: String, completion: @escaping (Post?) -> Void) {
+        let ref = Database.database().reference().child("posts").child(posterUID).child(postKey)
+        
+        ref.observeSingleEvent(of: .value, with: { (snapshot) in
+            guard let post = Post(snapshot: snapshot) else {
+                return completion(nil)
+            }
+            
+            LikeService.isPostLiked(post) { (isLiked) in
+                post.isLiked = isLiked
+                completion(post)
+            }
+        })
     }
 }
